@@ -21,14 +21,14 @@ Real-world recommenders like Spotify combine collaborative filtering (learning f
 
 ### Song Features
 
-Each `Song` object stores the following attributes used in scoring:
+Each `Song` object stores the following attributes:
 
 - `energy` — how intense or active the track feels (0.0 to 1.0)
 - `acousticness` — how acoustic vs. electronic the song is (0.0 to 1.0)
 - `valence` — emotional positivity; high = uplifting, low = melancholic (0.0 to 1.0)
 - `danceability` — how suitable the track is for dancing (0.0 to 1.0)
-- `genre` — broad style category (pop, lofi, rock, ambient, jazz, synthwave, indie pop)
-- `mood` — descriptive feel of the track (happy, chill, intense, relaxed, moody, focused)
+- `genre` — broad style category (pop, lofi, rock, ambient, jazz, synthwave, indie pop, etc.)
+- `mood` — descriptive feel of the track (happy, chill, intense, relaxed, moody, focused, etc.)
 - `tempo_bpm` — beats per minute (stored but not weighted heavily at this scale)
 
 ### UserProfile Features
@@ -36,26 +36,42 @@ Each `Song` object stores the following attributes used in scoring:
 Each `UserProfile` stores:
 
 - `target_energy` — the user's preferred energy level (0.0 to 1.0)
-- `likes_acoustic` — whether the user prefers acoustic over electronic sounds
+- `likes_acoustic` — whether the user prefers acoustic over electronic sounds (True or False). True favors songs with high acousticness; False favors songs with low acousticness.
 - `favorite_genre` — the genre the user most wants to hear
 - `favorite_mood` — the mood the user is currently in
 
 ### Scoring Rule (per song)
 
-Each numeric feature gets a proximity score: `1 - |user_preference - song_value|`. These are combined using weighted average:
+Each numeric feature gets a proximity score: `1 - |user_preference - song_value|`, which ranges from 0.0 to 1.0. Categorical matches add a fixed bonus on top.
 
 ```
-total_score = 0.35 × energy_score
-            + 0.30 × acousticness_score
-            + 0.20 × valence_score
-            + 0.15 × danceability_score
+energy_score   = 1 - |target_energy - song.energy|
+acoustic_score = song.acousticness       if likes_acoustic is True
+               = 1 - song.acousticness   if likes_acoustic is False
+
+genre_bonus    = +2.0  if song.genre == favorite_genre, else 0
+mood_bonus     = +1.0  if song.mood  == favorite_mood,  else 0
+
+total_score    = energy_score + acoustic_score + genre_bonus + mood_bonus
 ```
 
-Categorical matches (genre, mood) add a small bonus on top.
+Maximum possible score is **5.0** (1.0 energy + 1.0 acoustic + 2.0 genre + 1.0 mood). Genre outweighs mood 2:1 because genre is a harder filter — a metal fan rarely enjoys jazz regardless of energy fit. Mood is a softer signal that complements the numeric scores.
 
 ### Ranking Rule (across all songs)
 
 All songs are scored, then sorted by `total_score` descending. The top `k` songs (default 5) are returned as recommendations.
+
+### Potential Biases in This Scoring Rule
+
+- **Genre dominance**: The genre bonus (+2.0) is 40% of the maximum possible score (5.0). A song in the right genre but with a poor energy and acoustic fit can still outscore a song that matches the user's numeric preferences perfectly in a different genre. Users with niche genre preferences may always get the same 1–2 songs at the top regardless of how well those songs actually fit their vibe.
+
+- **Catalog sparsity amplifies genre lock-in**: Most genres in this catalog appear only once across 20 songs. That single genre-matching song gets a +2.0 head start no matter how well it actually fits the user, making it very hard for other songs to compete.
+
+- **Binary acoustic preference**: `likes_acoustic` is True or False with no middle ground. Users who enjoy both acoustic and electronic sounds are forced to pick a side, which systematically disadvantages songs on the opposite end even if the user would genuinely enjoy them.
+
+- **Exact mood matching**: Mood comparisons are all-or-nothing. Similar moods like "chill" and "laid-back", or "happy" and "euphoric", are treated as completely different. A song that is a near-perfect mood match scores 0 for mood while an exact string match scores +1.0.
+
+- **Valence and danceability are invisible**: Songs store `valence` and `danceability` but the `UserProfile` has no fields to express preferences for those dimensions. The scoring formula ignores them entirely, so a high-energy dance track and a high-energy ballad score identically if their genre, mood, and acousticness match.
 
 ---
 
